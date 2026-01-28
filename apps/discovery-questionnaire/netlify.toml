@@ -10,3 +10,7 @@
 # Ensure proper routing for Next.js static export
 [build.environment]
   NODE_VERSION = "18"
+  # Netlify Secrets Scanning will fail the build if it detects env var values in the output.
+  # For NEXT_PUBLIC_* variables, this is expected (they are intentionally bundled client-side).
+  # We omit these keys from scanning so deploys don't fail.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_ANON_KEY"
