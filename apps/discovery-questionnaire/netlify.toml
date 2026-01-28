@@ -3,7 +3,6 @@
   publish = "out"
   base = "apps/discovery-questionnaire"
 
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Ensure proper routing for Next.js static export
+[build.environment]
+  NODE_VERSION = "18"

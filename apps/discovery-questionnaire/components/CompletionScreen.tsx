@@ -24,6 +24,19 @@ export function CompletionScreen({ response }: CompletionScreenProps) {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportJSON = () => {
+    const json = JSON.stringify(response, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `erp-questionnaire-${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const handlePrint = () => {
     const htmlContent = generateResponseHTML(response);
     const printWindow = window.open("", "_blank");
@@ -96,6 +109,12 @@ export function CompletionScreen({ response }: CompletionScreenProps) {
                     className="flex-1 bg-accent-coral text-white py-3 px-6 rounded-xl font-semibold hover:bg-accent-coralDark transition-all duration-200 shadow-card hover:shadow-card-hover focus-visible:ring-2 focus-visible:ring-accent-coral focus-visible:ring-offset-2"
                   >
                     Download HTML
+                  </button>
+                  <button
+                    onClick={handleExportJSON}
+                    className="flex-1 bg-brand-purple text-white py-3 px-6 rounded-xl font-semibold hover:bg-brand-purpleDark transition-all duration-200 shadow-card hover:shadow-card-hover focus-visible:ring-2 focus-visible:ring-brand-purple focus-visible:ring-offset-2"
+                  >
+                    Download JSON
                   </button>
                   <button
                     onClick={handlePrint}

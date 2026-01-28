@@ -1,0 +1,6 @@
+# Netlify redirects for Next.js static export
+# This file will be copied to the out directory during build
+
+# Handle client-side routing for Next.js
+/questionnaire/*  /questionnaire/index.html  200
+/*  /index.html  200
