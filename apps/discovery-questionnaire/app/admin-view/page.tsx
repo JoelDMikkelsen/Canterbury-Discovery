@@ -5,7 +5,6 @@ import { QuestionnaireResponse } from "@/types";
 import { getResponse } from "@/lib/localStorage";
 import { generateResponseHTML } from "@/lib/htmlGenerator";
 import { sections } from "@/lib/questions";
-import { initSupabase, getAllResponsesFromSupabase } from "@/lib/supabase";
 
 // Simple password protection - change this to your desired password
 const ADMIN_PASSWORD = "fusion5-admin-2024";
@@ -16,11 +15,11 @@ export default function AdminViewPage() {
   const [error, setError] = useState("");
   const [localResponse, setLocalResponse] = useState<QuestionnaireResponse | null>(null);
   const [importedResponses, setImportedResponses] = useState<QuestionnaireResponse[]>([]);
-  const [supabaseResponses, setSupabaseResponses] = useState<QuestionnaireResponse[]>([]);
+  const [dbResponses, setDbResponses] = useState<QuestionnaireResponse[]>([]);
   const [selectedResponse, setSelectedResponse] = useState<QuestionnaireResponse | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "detail">("list");
-  const [isLoadingSupabase, setIsLoadingSupabase] = useState(false);
-  const [supabaseError, setSupabaseError] = useState("");
+  const [isLoadingDb, setIsLoadingDb] = useState(false);
+  const [dbError, setDbError] = useState("");
 
   useEffect(() => {
     // Check if already authenticated (stored in sessionStorage)
@@ -28,36 +27,47 @@ export default function AdminViewPage() {
     if (authStatus === "true") {
       setIsAuthenticated(true);
       loadLocalResponse();
-      loadSupabaseResponses();
     }
   }, []);
 
-  const loadSupabaseResponses = async () => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseKey) {
-      return; // Supabase not configured
-    }
+  const loadDbResponses = async () => {
+    /**
+     * IMPORTANT SECURITY NOTE
+     * We intentionally DO NOT read from Supabase directly in the browser.
+     *
+     * Supabase anon SELECT is forbidden (RLS should block it).
+     * Admin reads must go through a Netlify Function which uses SUPABASE_SERVICE_ROLE_KEY
+     * server-side. That key must never be exposed to client code.
+     */
+    setIsLoadingDb(true);
+    setDbError("");
 
-    initSupabase(supabaseUrl, supabaseKey);
-    setIsLoadingSupabase(true);
-    setSupabaseError("");
+    try {
+      const res = await fetch("/.netlify/functions/getResponses", { method: "GET" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Request failed: ${res.status} ${text}`);
+      }
+      const payload = (await res.json()) as { ok: boolean; data?: any[]; error?: string };
+      if (!payload.ok) {
+        throw new Error(payload.error || "Failed to load responses");
+      }
 
-    const result = await getAllResponsesFromSupabase();
-    
-    if (result.data) {
-      // Extract response_data from Supabase format
-      const responses = result.data.map((item: any) => item.response_data as QuestionnaireResponse);
-      setSupabaseResponses(responses);
+      const rows = Array.isArray(payload.data) ? payload.data : [];
+      // Our insert stores the full questionnaire response JSON inside response_data.
+      const responses = rows
+        .map((row: any) => row?.response_data)
+        .filter(Boolean) as QuestionnaireResponse[];
+
+      setDbResponses(responses);
       if (responses.length > 0 && !selectedResponse) {
         setSelectedResponse(responses[0]);
       }
-    } else {
-      setSupabaseError(result.error || "Failed to load responses");
+    } catch (e: any) {
+      setDbError(e?.message || "Failed to load responses");
+    } finally {
+      setIsLoadingDb(false);
     }
-    
-    setIsLoadingSupabase(false);
   };
 
   const loadLocalResponse = () => {
@@ -246,11 +256,6 @@ export default function AdminViewPage() {
     );
   }
 
-  const allResponses = [
-    ...(localResponse ? [localResponse] : []),
-    ...importedResponses,
-  ];
-
   return (
     <div className="min-h-screen bg-neutral-bg py-8">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -279,26 +284,24 @@ export default function AdminViewPage() {
             <div className="bg-white rounded-2xl shadow-card p-5 sticky top-4">
               <h2 className="font-bold text-brand-purple mb-4">Responses</h2>
               
-              {/* Supabase Load Button */}
-              {process.env.NEXT_PUBLIC_SUPABASE_URL && (
-                <div className="mb-4">
-                  <button
-                    onClick={loadSupabaseResponses}
-                    disabled={isLoadingSupabase}
-                    className="w-full bg-brand-purple text-white py-2 px-4 rounded-xl font-semibold text-sm hover:bg-brand-purpleDark transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isLoadingSupabase ? "Loading..." : "Load from Database"}
-                  </button>
-                  {supabaseError && (
-                    <p className="text-xs text-red-600 mt-2 text-center">{supabaseError}</p>
-                  )}
-                  {supabaseResponses.length > 0 && (
-                    <p className="text-xs text-green-600 mt-2 text-center">
-                      {supabaseResponses.length} response(s) loaded
-                    </p>
-                  )}
-                </div>
-              )}
+              {/* Database Load Button (server-side via Netlify Function) */}
+              <div className="mb-4">
+                <button
+                  onClick={loadDbResponses}
+                  disabled={isLoadingDb}
+                  className="w-full bg-brand-purple text-white py-2 px-4 rounded-xl font-semibold text-sm hover:bg-brand-purpleDark transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoadingDb ? "Loading..." : "Load responses"}
+                </button>
+                {dbError && (
+                  <p className="text-xs text-red-600 mt-2 text-center">{dbError}</p>
+                )}
+                {dbResponses.length > 0 && !dbError && (
+                  <p className="text-xs text-green-600 mt-2 text-center">
+                    {dbResponses.length} response(s) loaded
+                  </p>
+                )}
+              </div>
 
               {/* Import Button */}
               <div className="mb-4">
@@ -318,7 +321,7 @@ export default function AdminViewPage() {
 
               {/* Response List */}
               <div className="space-y-2 max-h-96 overflow-y-auto">
-                {(localResponse || importedResponses.length > 0 || supabaseResponses.length > 0) ? (
+                {(localResponse || importedResponses.length > 0 || dbResponses.length > 0) ? (
                   <>
                     {localResponse && (
                       <div className="mb-2">
@@ -343,10 +346,10 @@ export default function AdminViewPage() {
                         </button>
                       </div>
                     )}
-                    {supabaseResponses.length > 0 && (
+                    {dbResponses.length > 0 && (
                       <div className="mb-2">
-                        <p className="text-xs text-neutral-muted mb-1 px-2">Database ({supabaseResponses.length})</p>
-                        {supabaseResponses.map((response) => (
+                        <p className="text-xs text-neutral-muted mb-1 px-2">Database ({dbResponses.length})</p>
+                        {dbResponses.map((response) => (
                           <button
                             key={response.id}
                             onClick={() => {
@@ -403,7 +406,7 @@ export default function AdminViewPage() {
                   </>
                 ) : (
                   <p className="text-sm text-neutral-muted text-center py-4">
-                    No responses found. Load from database, import a JSON file, or use this browser to complete the questionnaire.
+                    No responses found. Load responses, import a JSON file, or use this browser to complete the questionnaire.
                   </p>
                 )}
               </div>

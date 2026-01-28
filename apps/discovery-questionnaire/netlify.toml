@@ -3,6 +3,10 @@
   publish = "out"
   base = "apps/discovery-questionnaire"
 
+[functions]
+  # Functions directory is relative to the base directory above.
+  directory = "netlify/functions"
+
 # Ensure proper routing for Next.js static export
 [build.environment]
   NODE_VERSION = "18"
