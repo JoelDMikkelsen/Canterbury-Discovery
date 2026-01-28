@@ -5,6 +5,7 @@ import { QuestionnaireResponse } from "@/types";
 import { getResponse } from "@/lib/localStorage";
 import { generateResponseHTML } from "@/lib/htmlGenerator";
 import { sections } from "@/lib/questions";
+import { initSupabase, getAllResponsesFromSupabase } from "@/lib/supabase";
 
 // Simple password protection - change this to your desired password
 const ADMIN_PASSWORD = "fusion5-admin-2024";
@@ -15,8 +16,11 @@ export default function AdminViewPage() {
   const [error, setError] = useState("");
   const [localResponse, setLocalResponse] = useState<QuestionnaireResponse | null>(null);
   const [importedResponses, setImportedResponses] = useState<QuestionnaireResponse[]>([]);
+  const [supabaseResponses, setSupabaseResponses] = useState<QuestionnaireResponse[]>([]);
   const [selectedResponse, setSelectedResponse] = useState<QuestionnaireResponse | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "detail">("list");
+  const [isLoadingSupabase, setIsLoadingSupabase] = useState(false);
+  const [supabaseError, setSupabaseError] = useState("");
 
   useEffect(() => {
     // Check if already authenticated (stored in sessionStorage)
@@ -24,8 +28,37 @@ export default function AdminViewPage() {
     if (authStatus === "true") {
       setIsAuthenticated(true);
       loadLocalResponse();
+      loadSupabaseResponses();
     }
   }, []);
+
+  const loadSupabaseResponses = async () => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return; // Supabase not configured
+    }
+
+    initSupabase(supabaseUrl, supabaseKey);
+    setIsLoadingSupabase(true);
+    setSupabaseError("");
+
+    const result = await getAllResponsesFromSupabase();
+    
+    if (result.data) {
+      // Extract response_data from Supabase format
+      const responses = result.data.map((item: any) => item.response_data as QuestionnaireResponse);
+      setSupabaseResponses(responses);
+      if (responses.length > 0 && !selectedResponse) {
+        setSelectedResponse(responses[0]);
+      }
+    } else {
+      setSupabaseError(result.error || "Failed to load responses");
+    }
+    
+    setIsLoadingSupabase(false);
+  };
 
   const loadLocalResponse = () => {
     const response = getResponse();
@@ -246,6 +279,27 @@ export default function AdminViewPage() {
             <div className="bg-white rounded-2xl shadow-card p-5 sticky top-4">
               <h2 className="font-bold text-brand-purple mb-4">Responses</h2>
               
+              {/* Supabase Load Button */}
+              {process.env.NEXT_PUBLIC_SUPABASE_URL && (
+                <div className="mb-4">
+                  <button
+                    onClick={loadSupabaseResponses}
+                    disabled={isLoadingSupabase}
+                    className="w-full bg-brand-purple text-white py-2 px-4 rounded-xl font-semibold text-sm hover:bg-brand-purpleDark transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoadingSupabase ? "Loading..." : "Load from Database"}
+                  </button>
+                  {supabaseError && (
+                    <p className="text-xs text-red-600 mt-2 text-center">{supabaseError}</p>
+                  )}
+                  {supabaseResponses.length > 0 && (
+                    <p className="text-xs text-green-600 mt-2 text-center">
+                      {supabaseResponses.length} response(s) loaded
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Import Button */}
               <div className="mb-4">
                 <label className="block w-full bg-accent-coral text-white py-2 px-4 rounded-xl font-semibold text-sm hover:bg-accent-coralDark transition-all cursor-pointer text-center">
@@ -264,47 +318,95 @@ export default function AdminViewPage() {
 
               {/* Response List */}
               <div className="space-y-2 max-h-96 overflow-y-auto">
-                {allResponses.length === 0 ? (
-                  <p className="text-sm text-neutral-muted text-center py-4">
-                    No responses found. Import a JSON file or use this browser to complete the questionnaire.
-                  </p>
+                {(localResponse || importedResponses.length > 0 || supabaseResponses.length > 0) ? (
+                  <>
+                    {localResponse && (
+                      <div className="mb-2">
+                        <p className="text-xs text-neutral-muted mb-1 px-2">Local Storage</p>
+                        <button
+                          onClick={() => {
+                            setSelectedResponse(localResponse);
+                            setViewMode("detail");
+                          }}
+                          className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
+                            selectedResponse?.id === localResponse.id
+                              ? "border-accent-coral bg-accent-coral/10"
+                              : "border-neutral-border hover:border-brand-purple"
+                          }`}
+                        >
+                          <div className="text-sm font-semibold text-neutral-text">
+                            {localResponse.metadata.userName || localResponse.metadata.userEmail || `Response ${localResponse.id}`}
+                          </div>
+                          <div className="text-xs text-neutral-muted mt-1">
+                            {localResponse.progress.percentComplete}% Complete
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                    {supabaseResponses.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-xs text-neutral-muted mb-1 px-2">Database ({supabaseResponses.length})</p>
+                        {supabaseResponses.map((response) => (
+                          <button
+                            key={response.id}
+                            onClick={() => {
+                              setSelectedResponse(response);
+                              setViewMode("detail");
+                            }}
+                            className={`w-full text-left p-3 rounded-xl border-2 transition-all mb-2 ${
+                              selectedResponse?.id === response.id
+                                ? "border-accent-coral bg-accent-coral/10"
+                                : "border-neutral-border hover:border-brand-purple"
+                            }`}
+                          >
+                            <div className="text-sm font-semibold text-neutral-text">
+                              {response.metadata.userName || response.metadata.userEmail || `Response ${response.id}`}
+                            </div>
+                            <div className="text-xs text-neutral-muted mt-1">
+                              {response.progress.percentComplete}% Complete
+                            </div>
+                            {response.completedAt && (
+                              <div className="text-xs text-green-600 mt-1">
+                                ✓ Completed
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {importedResponses.length > 0 && (
+                      <div className="mb-2">
+                        <p className="text-xs text-neutral-muted mb-1 px-2">Imported ({importedResponses.length})</p>
+                        {importedResponses.map((response) => (
+                          <button
+                            key={response.id}
+                            onClick={() => {
+                              setSelectedResponse(response);
+                              setViewMode("detail");
+                            }}
+                            className={`w-full text-left p-3 rounded-xl border-2 transition-all mb-2 ${
+                              selectedResponse?.id === response.id
+                                ? "border-accent-coral bg-accent-coral/10"
+                                : "border-neutral-border hover:border-brand-purple"
+                            }`}
+                          >
+                            <div className="text-sm font-semibold text-neutral-text">
+                              {response.metadata.userName || response.metadata.userEmail || `Response ${response.id}`}
+                            </div>
+                            <div className="text-xs text-neutral-muted mt-1">
+                              {response.progress.percentComplete}% Complete
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  allResponses.map((response) => (
-                    <button
-                      key={response.id}
-                      onClick={() => {
-                        setSelectedResponse(response);
-                        setViewMode("detail");
-                      }}
-                      className={`w-full text-left p-3 rounded-xl border-2 transition-all ${
-                        selectedResponse?.id === response.id
-                          ? "border-accent-coral bg-accent-coral/10"
-                          : "border-neutral-border hover:border-brand-purple"
-                      }`}
-                    >
-                      <div className="text-sm font-semibold text-neutral-text">
-                        {response.metadata.userName || response.metadata.userEmail || `Response ${response.id}`}
-                      </div>
-                      <div className="text-xs text-neutral-muted mt-1">
-                        {response.progress.percentComplete}% Complete
-                      </div>
-                      {response.completedAt && (
-                        <div className="text-xs text-green-600 mt-1">
-                          ✓ Completed
-                        </div>
-                      )}
-                    </button>
-                  ))
+                  <p className="text-sm text-neutral-muted text-center py-4">
+                    No responses found. Load from database, import a JSON file, or use this browser to complete the questionnaire.
+                  </p>
                 )}
               </div>
-
-              {localResponse && (
-                <div className="mt-4 pt-4 border-t border-neutral-border">
-                  <p className="text-xs text-neutral-muted">
-                    <strong>Local Storage:</strong> Response from this browser
-                  </p>
-                </div>
-              )}
             </div>
           </aside>
 

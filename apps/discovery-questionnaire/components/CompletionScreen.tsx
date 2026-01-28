@@ -3,6 +3,8 @@
 import { QuestionnaireResponse } from "@/types";
 import { generateResponseHTML } from "@/lib/htmlGenerator";
 import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { initSupabase, saveResponseToSupabase } from "@/lib/supabase";
 
 interface CompletionScreenProps {
   response: QuestionnaireResponse;
@@ -10,6 +12,44 @@ interface CompletionScreenProps {
 
 export function CompletionScreen({ response }: CompletionScreenProps) {
   const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    // Initialize Supabase if configured
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (supabaseUrl && supabaseKey) {
+      initSupabase(supabaseUrl, supabaseKey);
+      // Auto-save to Supabase on mount
+      handleSaveToDatabase();
+    }
+  }, []);
+
+  const handleSaveToDatabase = async () => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return; // Supabase not configured, skip
+    }
+
+    setIsSaving(true);
+    setSaveStatus("idle");
+    
+    const result = await saveResponseToSupabase(response);
+    
+    if (result.success) {
+      setSaveStatus("success");
+    } else {
+      setSaveStatus("error");
+      setSaveError(result.error || "Failed to save");
+    }
+    
+    setIsSaving(false);
+  };
 
   const handleExport = () => {
     const htmlContent = generateResponseHTML(response);
@@ -94,6 +134,28 @@ export function CompletionScreen({ response }: CompletionScreenProps) {
                     ? `Thank you, ${response.metadata.userName}, for completing the ERP Discovery Questionnaire.`
                     : "Thank you for completing the ERP Discovery Questionnaire."}
                 </p>
+                {process.env.NEXT_PUBLIC_SUPABASE_URL && (
+                  <div className="mt-3">
+                    {isSaving && (
+                      <p className="text-sm text-green-700">Saving to database...</p>
+                    )}
+                    {saveStatus === "success" && (
+                      <p className="text-sm text-green-700 font-semibold">✓ Response saved to database</p>
+                    )}
+                    {saveStatus === "error" && (
+                      <div>
+                        <p className="text-sm text-red-700 font-semibold">⚠ Failed to save to database</p>
+                        <p className="text-xs text-red-600 mt-1">{saveError}</p>
+                        <button
+                          onClick={handleSaveToDatabase}
+                          className="mt-2 text-xs text-green-700 underline hover:text-green-800"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="bg-brand-purple/5 border-l-4 border-brand-purple rounded-r-xl p-5">
